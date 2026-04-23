@@ -92,3 +92,5 @@ export interface AuthState {
   isLoading: boolean
   error: string | null
 }
+
+export type DashboardTab = 'overview' | 'recommendations' | 'benchmark' | 'explore'

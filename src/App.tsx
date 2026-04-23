@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './hooks/useAuth'
 import { ThemeProvider } from './hooks/useTheme'
 import Landing from './pages/Landing'
 import Dashboard from './pages/Dashboard'
+import ChannelReport from './pages/ChannelReport'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { accessToken, isLoading } = useAuth()
@@ -44,6 +45,8 @@ export default function App() {
                 <Dashboard />
               </ProtectedRoute>
             } />
+            {/* Public shareable channel report - no auth needed if token in localStorage */}
+            <Route path="/channel/:login" element={<ChannelReport />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </BrowserRouter>
