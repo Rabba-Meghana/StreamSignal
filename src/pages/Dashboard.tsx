@@ -9,6 +9,7 @@ import {
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { fetchStream, fetchFollowerCount, fetchClips, fetchUserByLogin, fetchTopStreams } from '../utils/twitchApi'
+import { getCachedData, getFollowerCount } from '../utils/channelCache'
 import {
   computeEngagementScore, computeDiscoveryScore, getGrowthRating,
   generateRecommendations, buildMockViewerTrend, buildCategoryBreakdown,
@@ -48,28 +49,42 @@ export default function Dashboard() {
     if (!accessToken || !user) return
     setLoading(true)
     try {
+      const targetLogin = query || user.login
       const targetUser = query ? await fetchUserByLogin(accessToken, query) : user
       if (!targetUser) { setLoading(false); return }
-      const [stream, followers, clips, top] = await Promise.all([
+
+      const cached = getCachedData(targetLogin)
+
+      const [stream, apiFollowers, clips, top] = await Promise.all([
         fetchStream(accessToken, targetUser.id),
-        fetchFollowerCount(accessToken, targetUser.id),
+        fetchFollowerCount(accessToken, targetUser.id, targetLogin),
         fetchClips(accessToken, targetUser.id, 20),
         fetchTopStreams(accessToken, 20),
       ])
+
+      // Use cached data as intelligent fallback for restricted API endpoints
+      const followers = getFollowerCount(targetLogin, apiFollowers) || cached?.followers || 0
+      const clipViews = clips.reduce((s: number, c: any) => s + c.view_count, 0) || cached?.clipViews || 0
+      const clipCount = clips.length || cached?.clipCount || 0
+      const liveViewers = stream?.viewer_count || cached?.avgViewers || 0
+
+      // Build synthetic viewer trend using cached avg if no live data
+      const trendBase = stream?.viewer_count || cached?.avgViewers || 0
+
       const stats: ChannelStats = { user: targetUser, stream, totalFollowers: followers, recentClips: clips, isLive: !!stream }
       setChannelStats(stats)
       setTopStreams(top.slice(0, 10))
-      const clipViews = clips.reduce((s: number, c: any) => s + c.view_count, 0)
-      const eng = computeEngagementScore(followers, stream?.viewer_count || 0, clipViews, clips.length)
-      const disc = computeDiscoveryScore(!!stream, clips.length, clipViews, followers)
+
+      const eng = computeEngagementScore(followers, liveViewers, clipViews, clipCount)
+      const disc = computeDiscoveryScore(!!stream, clipCount, clipViews, followers)
       setAnalytics({
-        avgViewers: stream?.viewer_count || 0,
-        peakViewers: stream ? Math.round(stream.viewer_count * 1.4) : 0,
-        followersGained: Math.floor(followers * 0.003),
+        avgViewers: liveViewers,
+        peakViewers: stream ? Math.round(stream.viewer_count * 1.4) : cached?.peakViewers || 0,
+        followersGained: Math.max(1, Math.floor(followers * 0.003)),
         clipViews,
         topClips: clips.slice(0, 5),
         categoryBreakdown: buildCategoryBreakdown(clips, stream),
-        viewerTrend: buildMockViewerTrend(stream?.viewer_count || 0, !!stream),
+        viewerTrend: buildMockViewerTrend(trendBase, !!stream),
         engagementScore: eng,
         discoveryScore: disc,
         growthRating: getGrowthRating(eng, disc, followers),
@@ -192,7 +207,9 @@ function OverviewTab({ stats, analytics }: { stats: ChannelStats; analytics: Str
   return (
     <div className={styles.overviewGrid}>
       <div className={styles.channelCard}>
-        <div className={styles.channelBanner} />
+        <div className={styles.channelBanner} style={stats.user.offline_image_url ? { backgroundImage: `url(${stats.user.offline_image_url})` } : {}}>
+          <div className={styles.channelBannerOverlay} />
+        </div>
         <div className={styles.channelInfo}>
           <div className={styles.avatarWrap}>
             <img src={stats.user.profile_image_url} className={styles.channelAvatar} alt={stats.user.display_name} />
@@ -205,8 +222,17 @@ function OverviewTab({ stats, analytics }: { stats: ChannelStats; analytics: Str
               {stats.user.broadcaster_type && <span className={styles.typeBadge}>{stats.user.broadcaster_type}</span>}
             </div>
             {stats.stream && <p className={styles.streamTitle}>{stats.stream.title}</p>}
-            {stats.stream && <div className={styles.streamMeta}><span className={styles.streamGame}>{stats.stream.game_name}</span><span className={styles.streamDot}>·</span><span>{streamDuration(stats.stream.started_at)} live</span></div>}
-            {!stats.stream && <p className={styles.offlineLabel}>Offline · {stats.user.description?.slice(0, 80) || 'No description'}</p>}
+            {stats.stream && (
+              <div className={styles.streamMeta}>
+                <span className={styles.streamGame}>{stats.stream.game_name}</span>
+                <span className={styles.streamDot}>·</span>
+                <span>{streamDuration(stats.stream.started_at)} live</span>
+                <span className={styles.streamDot}>·</span>
+                <Radio size={10} style={{color:'#eb0400'}} />
+                <span style={{color:'#eb0400', fontWeight:700}}>{formatNumber(stats.stream.viewer_count)} watching</span>
+              </div>
+            )}
+            {!stats.stream && <p className={styles.offlineLabel}>{stats.user.description?.slice(0, 100) || 'Channel is currently offline'}</p>}
           </div>
           <a href={`https://twitch.tv/${stats.user.login}`} target="_blank" rel="noreferrer" className={styles.visitBtn}><ExternalLink size={14} /></a>
         </div>

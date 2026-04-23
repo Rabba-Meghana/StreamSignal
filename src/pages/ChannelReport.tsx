@@ -5,6 +5,7 @@ import { TrendingUp, Users, Eye, Film, Share2, CheckCircle, ArrowLeft, ExternalL
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { fetchUserByLogin, fetchStream, fetchFollowerCount, fetchClips } from '../utils/twitchApi'
+import { getCachedData, getFollowerCount } from '../utils/channelCache'
 import { computeEngagementScore, computeDiscoveryScore, getGrowthRating, generateRecommendations, buildMockViewerTrend, buildCategoryBreakdown, formatNumber, streamDuration, timeAgo } from '../utils/analytics'
 import { ChannelStats, StreamAnalytics } from '../types'
 import styles from './ChannelReport.module.css'
@@ -41,18 +42,23 @@ export default function ChannelReport() {
       const user = await fetchUserByLogin(accessToken, login)
       if (!user) { setNotFound(true); setLoading(false); return }
 
-      const [stream, followers, clips] = await Promise.all([
+      const cached = getCachedData(login!)
+
+      const [stream, apiFollowers, clips] = await Promise.all([
         fetchStream(accessToken, user.id),
-        fetchFollowerCount(accessToken, user.id),
+        fetchFollowerCount(accessToken, user.id, login),
         fetchClips(accessToken, user.id, 20),
       ])
+
+      const followers = getFollowerCount(login!, apiFollowers) || cached?.followers || 0
+      const totalClipViews = clips.reduce((a: number, c: any) => a + c.view_count, 0) || cached?.clipViews || 0
+      const clipCount = clips.length || cached?.clipCount || 0
 
       const s: ChannelStats = { user, stream, totalFollowers: followers, recentClips: clips, isLive: !!stream }
       setStats(s)
 
-      const totalClipViews = clips.reduce((a: number, c: any) => a + c.view_count, 0)
-      const eng = computeEngagementScore(followers, stream?.viewer_count || 0, totalClipViews, clips.length)
-      const disc = computeDiscoveryScore(!!stream, clips.length, totalClipViews, followers)
+      const eng = computeEngagementScore(followers, stream?.viewer_count || cached?.avgViewers || 0, totalClipViews, clipCount)
+      const disc = computeDiscoveryScore(!!stream, clipCount, totalClipViews, followers)
 
       setAnalytics({
         avgViewers: stream?.viewer_count || 0,

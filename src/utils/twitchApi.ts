@@ -39,13 +39,23 @@ export const fetchStream = async (token: string, userId: string): Promise<Twitch
   return res.data.data[0] || null
 }
 
-export const fetchFollowerCount = async (token: string, broadcasterId: string): Promise<number> => {
+export const fetchFollowerCount = async (token: string, broadcasterId: string, login?: string): Promise<number> => {
+  // Try the privileged endpoint first (works for the authed user's own channel)
   try {
     const res = await api(token).get(`/channels/followers?broadcaster_id=${broadcasterId}&first=1`)
-    return res.data.total || 0
-  } catch {
-    return 0
+    if (res.data.total > 0) return res.data.total
+  } catch {}
+
+  // Fallback: search/channels returns follower_count for any public channel
+  if (login) {
+    try {
+      const res = await api(token).get(`/search/channels?query=${encodeURIComponent(login)}&first=10&live_only=false`)
+      const match = res.data.data?.find((c: any) => c.broadcaster_login === login.toLowerCase())
+      if (match?.follower_count) return match.follower_count
+    } catch {}
   }
+
+  return 0
 }
 
 export const fetchClips = async (token: string, broadcasterId: string, first = 20): Promise<TwitchClip[]> => {

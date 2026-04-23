@@ -1,5 +1,6 @@
 import { TwitchUser, TwitchStream, TwitchClip } from '../types'
 import { fetchUsersByLogins, fetchStreamsByUserIds, fetchFollowerCount, fetchClips, BENCHMARK_LOGINS } from './twitchApi'
+import { getFollowerCount } from './channelCache'
 
 export interface BenchmarkChannel {
   user: TwitchUser
@@ -64,10 +65,11 @@ export const buildBenchmark = async (
   const benchChannels: BenchmarkChannel[] = await Promise.all(
     benchUsers.map(async (user) => {
       const stream = benchStreams.find(s => s.user_id === user.id) || null
-      const [followers, clips] = await Promise.all([
-        fetchFollowerCount(token, user.id),
+      const [apiFollowers, clips] = await Promise.all([
+        fetchFollowerCount(token, user.id, user.login),
         fetchClips(token, user.id, 10),
       ])
+      const followers = getFollowerCount(user.login, apiFollowers)
       const viewerCount = stream?.viewer_count || 0
       const clipViews = clips.reduce((s, c) => s + c.view_count, 0)
       const { engagement, discovery } = computeScore(followers, viewerCount, clipViews, clips.length)
